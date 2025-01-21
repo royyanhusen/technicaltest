@@ -298,4 +298,6 @@ return [
 
     ],
 
+    'ttl' => env('JWT_TTL', 60), // Waktu kedaluwarsa untuk akses token (dalam menit)
+    'refresh_ttl' => env('JWT_REFRESH_TTL', 20160), // Waktu kedaluwarsa untuk refresh token (dalam menit)
 ];
