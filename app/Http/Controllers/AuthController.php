@@ -1,12 +1,16 @@
 <?php
+
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Models\RefreshToken;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\Auth;
 
 class AuthController extends Controller
 {
@@ -37,7 +41,17 @@ class AuthController extends Controller
         // Create JWT token after registration
         $token = JWTAuth::fromUser($user);
 
-        return response()->json(['user' => $user, 'token' => $token], 201);
+        // Create a refresh token manually (set the expiration to 7 days)
+        $refreshToken = JWTAuth::fromUser($user, ['exp' => now()->addDays(7)->timestamp]);
+
+        // Save the refresh token in the database
+        RefreshToken::create([
+            'user_id' => $user->id,
+            'token' => $refreshToken,
+            'expires_at' => Carbon::now()->addDays(7),
+        ]);
+
+        return response()->json(['user' => $user, 'token' => $token, 'refresh_token' => $refreshToken], 201);
     }
 
     /**
@@ -54,11 +68,23 @@ class AuthController extends Controller
             if (!$token = JWTAuth::attempt($credentials)) {
                 return response()->json(['error' => 'Invalid credentials'], 401);
             }
+
+            // Generate refresh token with a longer expiration (e.g., 7 days)
+            $user = User::where('email', $request->email)->first();
+            $refreshToken = JWTAuth::fromUser($user, ['exp' => now()->addDays(7)->timestamp]);
+
+            // Save the refresh token in the database
+            RefreshToken::create([
+                'user_id' => $user->id,
+                'token' => $refreshToken,
+                'expires_at' => Carbon::now()->addDays(7),
+            ]);
+
         } catch (JWTException $e) {
             return response()->json(['error' => 'Could not create token'], 500);
         }
 
-        return response()->json(compact('token'));
+        return response()->json(compact('token', 'refresh_token'));
     }
 
     /**
@@ -66,20 +92,59 @@ class AuthController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function logout()
+    public function logout(Request $request)
     {
+        $user = Auth::user();
+
+        // Invalidate the access token
         JWTAuth::invalidate(JWTAuth::getToken());
+
+        // Remove the refresh token from the database
+        RefreshToken::where('user_id', $user->id)->delete();
+
         return response()->json(['message' => 'Successfully logged out']);
     }
 
-    
+    /**
+     * Refresh the JWT token using refresh token
+     *
+     * @param \Illuminate\Http\Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function refresh(Request $request)
+    {
+        $refreshToken = $request->input('refresh_token'); // Get refresh token from request
+
+        try {
+            // Validate refresh token and find the associated user
+            $storedRefreshToken = RefreshToken::where('token', $refreshToken)->first();
+            if (!$storedRefreshToken || $storedRefreshToken->expires_at < Carbon::now()) {
+                return response()->json(['error' => 'Invalid or expired refresh token'], 401);
+            }
+
+            // Attempt to refresh the token using the provided refresh token
+            if (!$token = JWTAuth::refresh($refreshToken)) {
+                return response()->json(['error' => 'Could not refresh token'], 500);
+            }
+
+        } catch (JWTException $e) {
+            return response()->json(['error' => 'Could not refresh token'], 500);
+        }
+
+        return response()->json(compact('token')); // Return new JWT token
+    }
+
+    /**
+     * Update last activity timestamp (Optional)
+     *
+     * @param \Illuminate\Http\Request $request
+     * @return \Illuminate\Http\Response
+     */
     public function updateLastActivity(Request $request)
     {
-        // Memperbarui waktu aktivitas terakhir di session
+        // Update the last activity time in the session
         session(['last_activity' => time()]);
 
         return response()->json(['status' => 'success']);
     }
-
-
 }

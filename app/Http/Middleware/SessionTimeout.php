@@ -20,9 +20,6 @@ class SessionTimeout
                 $request->session()->invalidate();
                 $request->session()->regenerateToken();
 
-                // Menyimpan flash message
-                // Session::flash('status', 'Sesi Anda telah habis. Silakan login kembali.');
-
                 // Redirect ke halaman login
                 return redirect('/login');
             }
